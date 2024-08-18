@@ -1,56 +1,52 @@
+package nicehcy2.map_api_test.map.service;
+
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriComponentsBuilder;
 
-import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
 public class LocationService {
 
-    @Value("${kakao.api.key}")
-    private String kakaoApiKey; // 카카오 REST API 키
-
     private final RestTemplate restTemplate;
+    private final String kakaoApiKey;
 
-    public LocationService(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
+    @Autowired
+    public LocationService(RestTemplateBuilder restTemplateBuilder, @Value("${kakao.api.key}") String kakaoApiKey) {
+        this.restTemplate = restTemplateBuilder.build();
+        this.kakaoApiKey = kakaoApiKey;
     }
 
-    public String getLocationName(double latitude, double longitude) {
-        String url = "https://dapi.kakao.com/v2/local/geo/coord2address.json";
+    public String getAddressFromCoordinates(double latitude, double longitude) {
+        String url = String.format("https://dapi.kakao.com/v2/local/geo/coord2address.json?x=%s&y=%s", longitude, latitude);
 
-        // 좌표를 주소로 변환하기 위한 URL 생성
-        UriComponentsBuilder uriBuilder = UriComponentsBuilder.fromHttpUrl(url)
-                .queryParam("x", longitude)  // 경도
-                .queryParam("y", latitude);  // 위도
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("Authorization", "KakaoAK " + kakaoApiKey);
 
-        // HTTP 헤더 설정 (Authorization에 카카오 API 키를 넣음)
-        Map<String, String> headers = new HashMap<>();
-        headers.put("Authorization", "KakaoAK " + kakaoApiKey);
+        HttpEntity<String> entity = new HttpEntity<>(headers);
 
-        // 카카오 API 호출
-        String response = restTemplate.getForObject(
-                uriBuilder.toUriString(),
-                String.class,
-                headers
-        );
+        try {
+            ResponseEntity<Map> response = restTemplate.exchange(url, HttpMethod.GET, entity, Map.class);
 
-        // 응답에서 지역명을 추출하여 반환
-        return extractAddressFromResponse(response);
-    }
-
-    private String extractAddressFromResponse(String response) {
-        // JSON 파싱 로직 (Gson 또는 Jackson을 사용 가능)
-        // 예제에서는 단순한 문자열 파싱 로직을 사용합니다.
-
-        if (response.contains("address_name")) {
-            int startIndex = response.indexOf("address_name") + 15;
-            int endIndex = response.indexOf("\"", startIndex);
-            return response.substring(startIndex, endIndex);
-        } else {
-            return "Address not found";
+            if (response.getStatusCode() == HttpStatus.OK) {
+                Map<String, Object> responseBody = response.getBody();
+                if (responseBody != null && responseBody.containsKey("documents")) {
+                    List<Map<String, Object>> documents = (List<Map<String, Object>>) responseBody.get("documents");
+                    if (!documents.isEmpty()) {
+                        Map<String, Object> addressData = (Map<String, Object>) documents.get(0).get("address");
+                        return (String) addressData.get("address_name");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
+
+        return "Address not found";
     }
 }
